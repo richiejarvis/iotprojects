@@ -5,31 +5,36 @@
 #include <Wire.h>
 #include <SPI.h>
 #include "time.h"
-#include <ArduinoJson.h>
 #include <HTTPClient.h>
-#include <IotWebConf.h>
 
 Adafruit_BME280 bme; // use I2C interface
 Adafruit_Sensor *bme_temp = bme.getTemperatureSensor();
 Adafruit_Sensor *bme_pressure = bme.getPressureSensor();
 Adafruit_Sensor *bme_humidity = bme.getHumiditySensor();
 
-const String url = "http://elastic:thibor@172.24.42.100:19200/weather-alias/_doc";
-const char* ntpServer = "pool.ntp.org";
+// Variables
 const long  gmtOffset_sec = 0;
 const int   daylightOffset_sec = 0;
-const char thingName[] = "weatherNew";
+const char sensorName[] = "weather1";
 const char wifiInitialApPassword[] = "weather";
+const char* ntpServer = "pool.ntp.org";
+// These settings are hardcoded for now, but will add them to the setup window in future.
+String elasticUsername = "weather";
+String elasticPass = "password";
+String elasticHost = "jd.heliosuk.net";
+String elasticIndex = "weather-alias";
+String elasticPort = "19200";
 
 
-String prevDataSet = "";
+
+
 long prevTime = 0;
 HTTPClient http;
 
-// Variables
+
 float temperature;
 
-
+int iteration = 0;
 
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
@@ -50,11 +55,11 @@ DNSServer dnsServer;
 WebServer server(80);
 HTTPUpdateServer httpUpdater;
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
+IotWebConf iotWebConf(sensorName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(500000);
   /* Initialise the sensor */
   if (!bme.begin()) {
     Serial.println(F("Could not find a valid BME280 sensor, check wiring!"));
@@ -70,88 +75,73 @@ void setup() {
   iotWebConf.init();
 
   // -- Set up required URL handlers on the web server.
-  server.on("/", handleRoot);
-  server.on("/config", [] { iotWebConf.handleConfig(); });
+  //  server.on("/", handleRoot);
+  server.on("/", [] { iotWebConf.handleConfig(); });
   server.onNotFound([]() {
     iotWebConf.handleNotFound();
   });
-
-
-
-
-  //  // We start by connecting to a WiFi network
-  //  Serial.println();
-  //  Serial.print("Connecting to ");
-  //  Serial.println(ssid);
-  //  WiFi.begin(ssid, password);
-  //  while (WiFi.status() != WL_CONNECTED) {
-  //    delay(500);
-  //    Serial.print(".");
-  //  }
-  //  Serial.println("");
-  //  Serial.println("WiFi connected");
-  //  Serial.println("IP address: ");
-  //  Serial.println(WiFi.localIP());
-
-
-
 }
-
-
 
 void loop() {
 
+
   iotWebConf.doLoop();
-  bool checkWifi = (bool) iotWebConf.checkWifiConnection);
-    bool checkWifi = true;
-
-  if (checkWifi)) {
-    sensors_event_t temp_event, pressure_event, humidity_event;
-    bme_temp->getEvent(&temp_event);
-    bme_pressure->getEvent(&pressure_event);
-    bme_humidity->getEvent(&humidity_event);
-
-    // Store the values in local vars
-    float temperature = temp_event.temperature;
-    float humidity = humidity_event.relative_humidity;
-    float pressure = pressure_event.pressure;
-    // initialise an empty String for later on
-    String errorState = "NONE";
-    // Sanity check to make sure we are not underwater, or in space!
-    if (temperature < -40.00) {
-      errorState = "ERROR: TEMPERATURE SENSOR MISREAD";
-      if (pressure > 1100.00) {
-        errorState = "ERROR: PRESSURE SENSOR MISREAD";
-      }
+  sensors_event_t temp_event, pressure_event, humidity_event;
+  bme_temp->getEvent(&temp_event);
+  bme_pressure->getEvent(&pressure_event);
+  bme_humidity->getEvent(&humidity_event);
+  // Store the values in local vars
+  float temperature = temp_event.temperature;
+  float humidity = humidity_event.relative_humidity;
+  float pressure = pressure_event.pressure;
+  // initialise an empty String for later on
+  String errorState = "NONE";
+  // Sanity check to make sure we are not underwater, or in space!
+  if (temperature < -40.00) {
+    errorState = "ERROR: TEMPERATURE SENSOR MISREAD";
+    if (pressure > 1100.00) {
+      errorState = "ERROR: PRESSURE SENSOR MISREAD";
     }
+  }
 
-    //init and get the time
+  // Getting time via NTP is expensive, and causes problems with the IotWifiConf library
+  // For now, Calling it more frequently to see if it is easier to attach to the AP
+  if (iteration == 100) {
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     time_t now;
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-      Serial.println("Failed to obtain time");
+    if (!getLocalTime(&timeinfo))
+    {
+      Serial.println("NOT CONNECTED");
     } else {
       long nowTime = time(&now);
-      String dataSet = "{\"@timestamp\": " + String(nowTime) + ",\"pressure\": " + String(pressure) + ",\"temperature\": " + String(temperature) + ",\"humidity\": " + String(humidity) + ",\"errorstate\": \"" + errorState + "\"}";
-      // We can inspect the data being sent over the Serial line, in the Arduino IDE.
-      if (dataSet != prevDataSet && nowTime != prevTimeValue) {
+//      String sensorName(sensorName);
+      // Construct dataset to send   
+      String dataSet = "{\"@timestamp\":"+String(nowTime)+",\"pressure\":"+String(pressure)+",\"temperature\":"+String(temperature)+",\"humidity\":"+String(humidity)+",\"errorState\": \""+errorState+"\",\"sensorName\":\""+sensorName+"\"}";
+      Serial.println("Request:" + dataSet);                     
+      if (nowTime != prevTime)
+      {
+        String url = "http://" + elasticUsername + ":" + elasticPass + "@" + elasticHost + ":" + elasticPort + "/" + elasticIndex + "/_doc";
         http.begin(url);
+        Serial.print("URL:"+ url);
         http.addHeader("Content-Type", "application/json");
         int httpCode = http.POST(dataSet);
-        Serial.println("HTTPCode:" + String(httpCode) + " - " + dataSet);
-        prevDataSet = dataSet;
-        prevTimeValue = nowTime;
+        Serial.println("Response:" + String(httpCode));
       }
+      // Store the time, so we don't send for a second
+      prevTime = nowTime;
     }
+    iteration = 0;
   }
+  iteration++;
+
 }
 
+
 /**
- * Handle web requests to "/" path.
- */
-void handleRoot()
-{
+   Handle web requests to "/" path.
+*/
+void handleRoot() {
   // -- Let IotWebConf test and handle captive portal requests.
   if (iotWebConf.handleCaptivePortal())
   {
