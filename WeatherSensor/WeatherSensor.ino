@@ -1,3 +1,8 @@
+// WeatherSensor.ino - Richie Jarvis - richie@helkit.com
+// Version: v0.0.3
+// Github: https://github.com/richiejarvis/iotprojects/tree/master/WeatherSensor
+
+
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
