@@ -19,4 +19,53 @@ A simple ESP8266 or ESP32 compatible piece of code to read a BME280 sensor data,
   }
 ```
 
+Elasticsearch will normally detect these datatypes, however, if you wish to create a template, here is what I use:
+
+```
+PUT _template/weather_template
+{
+  "version": 2,
+  "order": 0,
+  "index_patterns": [
+    "weather-*"
+  ],
+  "settings": {
+    "index": {
+      "lifecycle": {
+        "name": "weather-ilm",
+        "rollover_alias": "weather-alias"
+      },
+      "number_of_shards": "1",
+      "number_of_replicas": "1"
+    }
+  },
+  "mappings": {
+    "properties": {
+      "@timestamp": {
+        "format": "epoch_second",
+        "type": "date"
+      },
+      "errorState": {
+        "type": "keyword"
+      },
+      "sensorName": {
+        "type": "keyword"
+      },
+      "temperature": {
+        "type": "float"
+      },
+      "humidity": {
+        "type": "float"
+      },
+      "location": {
+        "type": "geo_point"
+      },
+      "pressure": {
+        "type": "float"
+      }
+    }
+  }
+}
+```
+
 
