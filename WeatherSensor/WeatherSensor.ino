@@ -1,11 +1,12 @@
 // WeatherSensor.ino - Richie Jarvis - richie@helkit.com
-// Version: v0.0.4 - 2020-01-26
+// Version: v0.1.0 - 2020-01-27
 // Github: https://github.com/richiejarvis/iotprojects/tree/master/WeatherSensor
 // Version History
 // v0.0.1 - Initial Release
 // v0.0.2 - Added ES params
 // v0.0.3 - I2C address change tolerance & lat/long
 // v0.0.4 - SSL support
+// v0.1.0 - Display all the variables
 
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
@@ -21,7 +22,7 @@ Adafruit_Sensor *bme_temp = bme.getTemperatureSensor();
 Adafruit_Sensor *bme_pressure = bme.getPressureSensor();
 Adafruit_Sensor *bme_humidity = bme.getHumiditySensor();
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "newval2"
+#define CONFIG_VERSION "v0.1.0"
 #define STRING_LEN 128
 #define NUMBER_LEN 32
 
@@ -79,39 +80,6 @@ IotWebConfParameter latValue = IotWebConfParameter("Decimal Longitude", "latValu
 IotWebConfParameter lngValue = IotWebConfParameter("Decimal Latitude", "lngValue", lngForm, NUMBER_LEN, "number", "e.g. -23.712", NULL, "step='0.001'");
 IotWebConfParameter locationName = IotWebConfParameter("Sensor Name/Location Name", "locationName", locationNameForm, STRING_LEN);
 
-/**
-//   Handle web requests to "/" path.
-//*/
-//void handleRoot()
-//{
-//  // -- Let IotWebConf test and handle captive portal requests.
-//  if (iotWebConf.handleCaptivePortal())
-//  {
-//    // -- Captive portal request were already served.
-//    return;
-//  }
-//  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-//  s += "<title>WeatherStation</title></head><body>";
-//  s += "<ul>";
-//  s += "<p>";
-//  s += "<li>Elasticsearch Scheme: ";
-//  s += elasticPrefixForm;
-//  s += "<li>Elasticsearch Username: ";
-//  s += elasticUsernameForm;
-//  s += "<li>Elasticsearch Password: ";
-//  s += elasticPassForm;
-//  s += "<li>Elasticsearch Hostname: ";
-//  s += elasticHostForm;
-//  s += "<li>Elasticsearch Port: ";
-//  s += elasticPortForm;
-//  s += "<li>Elasticsearch Index/Alias: ";
-//  s += elasticIndexForm;
-//  s += "</ul>";
-//  s += "Go to <a href='config'>configure page</a> to change values.";
-//  s += "</body></html>\n";
-//
-//  server.send(200, "text/html", s);
-//}
 
 
 void setup() {
@@ -257,6 +225,7 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
+  
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
   s += "<title>WeatherStation</title></head><body>";
   s += "<ul>";
@@ -273,10 +242,15 @@ void handleRoot()
   s += elasticPortForm;
   s += "<li>Elasticsearch Index/Alias: ";
   s += elasticIndexForm;
+  s += "<li>Sensor Latitude: ";
+  s += latForm;
+  s += "<li>Sensor Longitude: ";
+  s += lngForm;
+  s += "<li>SensorName: ";
+  s += locationNameForm;
   s += "</ul>";
   s += "Go to <a href='config'>configure page</a> to change values.";
   s += "</body></html>\n";
-
   server.send(200, "text/html", s);
 }
 
