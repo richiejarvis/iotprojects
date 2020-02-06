@@ -1,5 +1,5 @@
 // WeatherSensor.ino - Richie Jarvis - richie@helkit.com
-// Version: v0.1.0 - 2020-01-27
+// Version: v0.1.1 - 2020-02-05
 // Github: https://github.com/richiejarvis/iotprojects/tree/master/WeatherSensor
 // Version History
 // v0.0.1 - Initial Release
@@ -7,6 +7,7 @@
 // v0.0.3 - I2C address change tolerance & lat/long
 // v0.0.4 - SSL support
 // v0.1.0 - Display all the variables
+// v0.1.1 - Store seconds since epoch, and increment as time passes to reduce ntp calls
 
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
@@ -22,7 +23,7 @@ Adafruit_Sensor *bme_temp = bme.getTemperatureSensor();
 Adafruit_Sensor *bme_pressure = bme.getPressureSensor();
 Adafruit_Sensor *bme_humidity = bme.getHumiditySensor();
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "v0.1.0"
+#define CONFIG_VERSION "v0.1.1"
 #define STRING_LEN 128
 #define NUMBER_LEN 32
 
@@ -34,11 +35,11 @@ const char wifiInitialApPassword[] = "WeatherSensor";
 const char* ntpServer = "pool.ntp.org";
 
 
-char elasticPrefixForm[STRING_LEN] = "http://";
+char elasticPrefixForm[STRING_LEN] = "https://";
 char elasticUsernameForm[STRING_LEN] = "weather";
 char elasticPassForm[STRING_LEN] = "password";
-char elasticHostForm[STRING_LEN] = "hostname";
-char elasticPortForm[STRING_LEN] = "9200";
+char elasticHostForm[STRING_LEN] = "sensor.helkit.com";
+char elasticPortForm[STRING_LEN] = "443";
 char elasticIndexForm[STRING_LEN] = "weather-alias";
 char latForm[NUMBER_LEN] = "50.0";
 char lngForm[NUMBER_LEN] = "0.0";
@@ -54,9 +55,8 @@ char locationNameForm[STRING_LEN] = "NewSensor";
 // Not currently used
 #define STATUS_PIN 13
 
-long prevTime = 0;
-float temperature;
-int iteration = 0;
+
+
 
 // -- Callback method declarations.
 void configSaved();
@@ -81,17 +81,29 @@ IotWebConfParameter lngValue = IotWebConfParameter("Decimal Latitude", "lngValue
 IotWebConfParameter locationName = IotWebConfParameter("Sensor Name/Location Name", "locationName", locationNameForm, STRING_LEN);
 
 
+long lastNtpTimeRead = 0;
+long nowTime = 0;
+long prevTime = 0;
+float temperature = 0;
+//int iteration = 0;
+String errorState = "NONE";
+long secondsSinceLastCheck = 0;
+boolean ntpSuccess = false;
+long lastReadClock = 0;
+
+
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Starting");
+  debugOutput("Starting WeatherSensor " + (String)CONFIG_VERSION);
+
   /* Initialise the sensor */
-  // This part tries I2C address 0x77 first, and then falls back to using 0x76.  
+  // This part tries I2C address 0x77 first, and then falls back to using 0x76.
   // If there is no I2C data with these addresses on the bus, then it reports a Fatal error, and stops
   if (!bme.begin(0x77, &Wire)) {
-    Serial.println("Not on 0x77 I2C address - checking 0x76");
+    debugOutput("Not on 0x77 I2C address - checking 0x76");
     if (!bme.begin(0x76, &Wire)) {
-      Serial.println(F("FATAL: Could not find a valid BME280 sensor, check wiring!"));
+      debugOutput("FATAL: Could not find a valid BME280 sensor, check wiring!");
       while (1) delay(10);
     }
   }
@@ -131,7 +143,24 @@ void loop() {
 
   // Check for configuration changes
   iotWebConf.doLoop();
-  // Start a sample, which cos
+  // Grab time
+  getNtpTime();
+//  debugOutput("DEBUG: Sec:" + (String)secondsSinceLastCheck + " lastNtpTimeRead:" + (String)lastNtpTimeRead);
+
+  if (ntpSuccess && nowTime > prevTime)
+  {
+    sampleAndSend();
+    // Store the last time we sent, so we can check if we need to do it again
+    prevTime = nowTime;
+  }
+
+  delay(50);
+
+}
+
+
+void sampleAndSend() {
+  // Start a sample
   sensors_event_t temp_event, pressure_event, humidity_event;
   bme_temp->getEvent(&temp_event);
   bme_pressure->getEvent(&pressure_event);
@@ -141,7 +170,6 @@ void loop() {
   float humidity = humidity_event.relative_humidity;
   float pressure = pressure_event.pressure;
   // Store whether the sensor was connected
-  String errorState = "NONE";
   // Sanity check to make sure we are not underwater, or in space!
   if (temperature < -40.00) {
     errorState = "ERROR: TEMPERATURE SENSOR MISREAD";
@@ -149,69 +177,45 @@ void loop() {
       errorState = "ERROR: PRESSURE SENSOR MISREAD";
     }
   }
+  // Build the dataset to send
+  String dataSet = " {\"@timestamp\":";
+  dataSet += String(nowTime);
+  dataSet += ",\"pressure\":";
+  dataSet += String(pressure);
+  dataSet += ",\"temperature\":";
+  dataSet += String(temperature);
+  dataSet += ",\"humidity\":";
+  dataSet += String(humidity);
+  dataSet += ",\"errorState\": \"";
+  dataSet += errorState;
+  dataSet += "\",\"sensorName\":\"";
+  dataSet += locationNameForm;
+  dataSet += "\",\"firmwareVersion\":\"";
+  dataSet += (String)CONFIG_VERSION;
+  dataSet += "\",\"location\":\"";
+  dataSet += latForm;
+  dataSet += ",";
+  dataSet += lngForm;
+  dataSet += "\"";
+  dataSet += "}";
 
-  // Getting time via NTP is expensive, and causes problems with the IotWifiConf library
-  // For now, Calling it more frequently to see if it is easier to attach to the AP
-  // Actually, it works very well this way to detect internet access.  If we can reach the NTP server, we are good to read the sensor.
-  // Only check the time & sensor every 100 loops - this is a way to allow the IotWifiConf to run, without being blocked by constant NTP calls.
-  if (iteration >= 100) {
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    time_t now;
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo))
-    {
-      Serial.println("NOT CONNECTED");
-    } else {
-      long nowTime = time(&now);
-      // Construct dataset to send
-      String dataSet = "{\"@timestamp\":";
-      dataSet += String(nowTime);
-      dataSet += ",\"pressure\":";
-      dataSet += String(pressure);
-      dataSet += ",\"temperature\":";
-      dataSet += String(temperature);
-      dataSet += ",\"humidity\":";
-      dataSet += String(humidity);
-      dataSet += ",\"errorState\": \"";
-      dataSet += errorState;
-      dataSet += "\",\"sensorName\":\"";
-      dataSet += locationNameForm;
-      dataSet += "\",\"location\":\"";
-      dataSet += latForm;
-      dataSet += ",";
-      dataSet += lngForm;
-      dataSet += "\"";
-      dataSet += "}";
-
-
-      // We only want 1 reading a second, although more is possible!
-      if (nowTime != prevTime)
-      {
-        String url = elasticPrefixForm;
-        url += elasticUsernameForm;
-        url += ":";
-        url += elasticPassForm;
-        url += "@";
-        url += elasticHostForm;
-        url += ":";
-        url += elasticPortForm;
-        url += "/";
-        url += elasticIndexForm;
-        url += "/_doc";
-        Serial.println("Request:" + dataSet);
-        http.begin(url);
-        //        Serial.print("URL:" + url);
-        http.addHeader("Content-Type", "application/json");
-        int httpCode = http.POST(dataSet);
-        Serial.println("Response:" + String(httpCode));
-      }
-      // Store the time, so we don't send for a second
-      prevTime = nowTime;
-    }
-    iteration = 0;
-  }
-  iteration++;
-
+  // Build the URL to send the JSON structure to
+  String url = elasticPrefixForm;
+  url += elasticUsernameForm;
+  url += ":";
+  url += elasticPassForm;
+  url += "@";
+  url += elasticHostForm;
+  url += ":";
+  url += elasticPortForm;
+  url += "/";
+  url += elasticIndexForm;
+  url += "/_doc";
+  debugOutput("INFO: Sent: " + dataSet);
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  int httpCode = http.POST(dataSet);
+  debugOutput("INFO: Response: " + String(httpCode));
 }
 
 /**
@@ -225,9 +229,9 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
-  
+
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>WeatherStation</title></head><body>";
+  s += "<title>WeatherStation - " + (String)CONFIG_VERSION + "</title></head><body>";
   s += "<ul>";
   s += "<p>";
   s += "<li>Elasticsearch Scheme: ";
@@ -256,20 +260,51 @@ void handleRoot()
 
 void configSaved()
 {
-  Serial.println("Configuration was updated.");
+  debugOutput("INFO: Configuration was updated.");
 }
 
 bool formValidator()
 {
-  Serial.println("Validating form.");
-  bool valid = true;
 
+  bool valid = true;
   int countOfVars = server.args();
-  Serial.println("Number of Variables Stored: " + String(countOfVars));
+  debugOutput("INFO: Number of Variables Stored: " + String(countOfVars));
   // Check we have the right number of variables (15 at last count)
   if (countOfVars < 15)
   {
+    debugOutput("ERROR: Form validation failed");
     valid = false;
   }
   return valid;
+}
+
+void getNtpTime()
+{
+  if (!ntpSuccess || secondsSinceLastCheck >= 600) {
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    time_t now;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo))
+    {
+      debugOutput("ERROR: Cannot connect to NTP server");
+      ntpSuccess = false;
+    } else {
+      nowTime = time(&now);
+      lastNtpTimeRead = nowTime;
+      lastReadClock = millis() / 1000;
+      debugOutput("INFO: NTP Server Time Now: " + (String)nowTime);
+      ntpSuccess = true;
+      secondsSinceLastCheck = 0;
+    }
+
+  } else {  
+    //How do we set nowTime to the current time?  We need to know how many seconds have elasped since the last ntp store.
+    secondsSinceLastCheck = (millis() / 1000) - lastReadClock;
+    nowTime = lastNtpTimeRead + secondsSinceLastCheck;
+  }
+}
+
+void debugOutput(String textToSend)
+{
+  Serial.println("ts:" + (String)nowTime + " up:" + (String)(millis() / 1000) + ": " + textToSend);
 }
