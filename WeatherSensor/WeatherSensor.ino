@@ -24,7 +24,7 @@
 
 // Store the IotWebConf config version.  Changing this forces IotWebConf to ignore previous settings
 // A useful alternative to the Pin 12 to GND reset
-#define CONFIG_VERSION "012b"
+#define CONFIG_VERSION "012"
 #define CONFIG_VERSION_NAME "v0.1.2"
 // IotWebConf max lengths
 #define STRING_LEN 50
