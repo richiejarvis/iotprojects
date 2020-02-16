@@ -78,7 +78,7 @@ long lastNtpTimeRead = 0;
 long nowTime = 0;
 long prevTime = 0;
 boolean ntpSuccess = false;
-float celcius = 0;
+float celsius = 0;
 String errorState = "NONE";
 // -- Callback method declarations.
 void configSaved();
@@ -175,27 +175,27 @@ void sampleAndSend() {
   bme_pressure->getEvent(&pressure_event);
   bme_humidity->getEvent(&humidity_event);
   // Store the values from the BME280 in local vars
-  float celcius = temp_event.temperature;
+  float celsius = temp_event.temperature;
   float humidity = humidity_event.relative_humidity;
   float pressure = pressure_event.pressure;
   // Store whether the sensor was connected
   // Sanity check to make sure we are not underwater, or in space!
-  if (celcius < -40.00) {
+  if (celsius < -40.00) {
     errorState = "ERROR: TEMPERATURE SENSOR MISREAD";
     if (pressure > 1100.00) {
       errorState = "ERROR: PRESSURE SENSOR MISREAD";
     }
   }
   // Build the dataset to send
-  float fahrenheit = celcius * 1.8 + 32;
+  float fahrenheit = celsius * 1.8 + 32;
   String dataSet = " {\"@timestamp\":";
   dataSet += String(nowTime);
   dataSet += ",\"pressure\":"; 
   dataSet += String(pressure);
   dataSet += ",\"temperature\":";
-  dataSet += String(celcius);
-  dataSet += ",\"celcius\":";
-  dataSet += String(celcius);
+  dataSet += String(celsius);
+  dataSet += ",\"celsius\":";
+  dataSet += String(celsius);
   dataSet += ",\"fahrenheit\":";
   dataSet += String(fahrenheit);
   dataSet += ",\"humidity\":";
