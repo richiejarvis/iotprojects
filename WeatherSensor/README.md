@@ -2,6 +2,9 @@
 __Author:__ Richie Jarvis - richie@helkit.com
 ## Description
 A simple ESP8266 or ESP32 compatible piece of code to read a BME280 sensor data, and send via wifi to an Elastic Stack.
+
+![Wiring Diagram](https://github.com/richiejarvis/iotprojects/blob/master/WeatherSensor/ESP32-BME280.png)
+
 ## Features
 1. Auto wifi configuration using https://github.com/prampec/IotWebConf
 2. Elasticsearch configuration parameters and WiFi are stored in flash on-chip once configured.
