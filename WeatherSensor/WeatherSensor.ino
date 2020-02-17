@@ -275,7 +275,8 @@ void handleRoot()
   s += "</ul>";
   s += "<p>";
   s += "<p>";
-  s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "Go to <a href='config'>configure page</a> to change values.<br><p>storageBuffer Size in Memory:";
+  s += storageBuffer.size();
   s += "<p><font face=\"Sans serif,Comic Sans MS,Lucida Console\">";
   s += "Last few datapoints sent:<br>";
   String logLine = "";
@@ -283,7 +284,7 @@ void handleRoot()
     s += logLine;
     s += "<br>";
   }
-  s += "</font><p>";
+  s += "</font><br><p> ";
   s += "</body></html>\n";
   server.send(200, "text/html", s);
 }
