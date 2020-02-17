@@ -82,10 +82,10 @@ long nowTime = 0;
 long prevTime = 0;
 boolean ntpSuccess = false;
 String errorState = "NONE";
-// Store data that is not sent for later delivery 
+// Store data that is not sent for later delivery
 RingBuf<String, 3600> storageBuffer;
 // Log store - only need 50 - plan is to display and update on main page
-RingBuf<String, 50> logBuffer;
+RingBuf<String, 20> logBuffer;
 // -- Callback method declarations.
 void configSaved();
 bool formValidator();
@@ -152,25 +152,37 @@ void setup() {
 }
 
 void loop() {
+  debugOutput("INFO: In Main Loop");
   // Check for configuration changes
   iotWebConf.doLoop();
   // Check if the wifi is connected
-  if (iotWebConf.getState() == 4) {
-    // Check if we need a new NTP time 
+  if (iotWebConf.getState() == 4 || nowTime > 0) {
+    // Check if we need a new NTP time
     getNtpTime();
     // If we've got a valid time, get a sample, and send it to Elasticsearch
-    if (ntpSuccess && nowTime > prevTime)
-    {
-      sampleAndSend();
-      // Store the last time we sent, so we can check when we need to do it again
-      prevTime = nowTime;
+    if (nowTime > prevTime) {
+      String dataSet = sample();
+      int httpCode = sendData(dataSet);
+      // If the storageBuffer has data, send it now
+      if (storageBuffer.size() != 0 && httpCode == 201) {
+        debugOutput("WARN: Emptying thy buffer unto Elasticsearch - Size Left:" + (String)storageBuffer.size( ));
+        while (storageBuffer.pop(dataSet) && httpCode == 201) {
+          // Pop the Queue until we can pop no more...
+          debugOutput("WARN: Emptying thy buffer unto Elasticsearch - Size Left:" + (String)storageBuffer.size());
+          httpCode == sendData(dataSet);
+        }
+        debugOutput("WARN: My cup is empty - Size Left:" + (String)storageBuffer.size());
+      }
     }
+    // Store the last time we sent, so we can check when we need to do it again
+    prevTime = nowTime;
   }
-  delay(100);
+  delay(500);
 }
 
 
-void sampleAndSend() {
+
+String sample() {
   // Start a sample
   sensors_event_t temp_event, pressure_event, humidity_event;
   bme_temp->getEvent(&temp_event);
@@ -191,7 +203,7 @@ void sampleAndSend() {
   // Build the dataset to send
   String dataSet = " {\"@timestamp\":";
   dataSet += String(nowTime);
-  dataSet += ",\"pressure\":"; 
+  dataSet += ",\"pressure\":";
   dataSet += String(pressure);
   dataSet += ",\"temperature\":";
   dataSet += String(temperature);
@@ -212,28 +224,44 @@ void sampleAndSend() {
   dataSet += "\"";
   dataSet += "}";
 
-  // Build the URL to send the JSON structure to
-  String url = elasticPrefixForm;
-  url += elasticUsernameForm;
-  url += ":";
-  url += elasticPassForm;
-  url += "@";
-  url += elasticHostForm;
-  url += ":";
-  url += elasticPortForm;
-  url += "/";
-  url += elasticIndexForm;
-  url += "/_doc";
-  debugOutput("INFO: Sent: " + dataSet);
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  int httpCode = http.POST(dataSet);
-  debugOutput("INFO: Response: " + String(httpCode));
-  logBuffer.push("Request:"+ dataSet + " Response:" + (String)httpCode);
-  if (httpCode == -1){
-    // This happens when ES does not answer - store this for sending later if we can...
-    storageBuffer.push(dataSet);
+  return dataSet;
+}
+
+int sendData(String dataBundle) {
+  int httpCode = 0;
+  if (iotWebConf.getState() == 4) {
+    // Build the URL to send the JSON structure to
+    String url = elasticPrefixForm;
+    url += elasticUsernameForm;
+    url += ":";
+    url += elasticPassForm;
+    url += "@";
+    url += elasticHostForm;
+    url += ":";
+    url += elasticPortForm;
+    url += "/";
+    url += elasticIndexForm;
+    url += "/_doc";
+    debugOutput("INFO: Sending: " + dataBundle);
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    httpCode = http.POST(dataBundle);
+    debugOutput("INFO: Response: " + String(httpCode));
+  } else {
+    // No connection?  No problem - store it...
+    storageBuffer.push(dataBundle);
+    debugOutput("WARN: Unable to send - Storing Dataset");
   }
+  rollingLogBuffer("Request:" + dataBundle + " Response:" + (String)httpCode);
+  return httpCode;
+}
+
+void rollingLogBuffer(String line) {
+  if (logBuffer.size() >= 20) {
+    String throwAway = "";
+    logBuffer.pop(throwAway);
+  }
+  logBuffer.push(line);
 }
 
 /**
@@ -277,14 +305,14 @@ void handleRoot()
   s += "<p>";
   s += "Go to <a href='config'>configure page</a> to change values.<br><p>storageBuffer Size in Memory:";
   s += storageBuffer.size();
-  s += "<p><font face=\"Sans serif,Comic Sans MS,Lucida Console\">";
-  s += "Last few datapoints sent:<br>";
-  String logLine = "";
-  while (logBuffer.pop(logLine)) {
-    s += logLine;
+  s += "<p>Last ";
+  s += (String)logBuffer.size();
+  s += " datapoints sent:<br><code>";
+  for (int count = 0 ; count < logBuffer.size(); count++) {
+    s += logBuffer[count];
     s += "<br>";
   }
-  s += "</font><br><p> ";
+  s += "</code><br><p> ";
   s += "</body></html>\n";
   server.send(200, "text/html", s);
 }
@@ -313,7 +341,8 @@ void getNtpTime()
 {
   // Get the real time via NTP for the first time
   // Or when the refresh timer expires
-  if (!ntpSuccess || secondsSinceLastCheck >= ntpServerRefresh) {
+  // Don't try if not connected, but keep advancing the time!
+  if (iotWebConf.getState() == 4 && (!ntpSuccess || secondsSinceLastCheck >= ntpServerRefresh)) {
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     time_t now;
     struct tm timeinfo;
@@ -321,7 +350,6 @@ void getNtpTime()
     {
       debugOutput("ERROR: Cannot connect to NTP server");
       ntpSuccess = false;
-      delay(500);
     } else {
       nowTime = time(&now);
       lastNtpTimeRead = nowTime;
@@ -330,12 +358,11 @@ void getNtpTime()
       ntpSuccess = true;
       secondsSinceLastCheck = 0;
     }
-
-  } else {
-    //How do we set nowTime to the current time?  We need to know how many seconds have elasped since the last ntp store.
-    secondsSinceLastCheck = (millis() / 1000) - lastReadClock;
-    nowTime = lastNtpTimeRead + secondsSinceLastCheck;
   }
+
+  //How do we set nowTime to the current time?  We need to know how many seconds have elasped since the last ntp store.
+  secondsSinceLastCheck = (millis() / 1000) - lastReadClock;
+  nowTime = lastNtpTimeRead + secondsSinceLastCheck;
 }
 
 // Simple output...
