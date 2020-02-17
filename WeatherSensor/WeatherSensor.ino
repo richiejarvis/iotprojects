@@ -11,6 +11,7 @@
 // v0.1.2 - Fix reset issue (oops! Connecting Pin 12 and GND does not reset AP password).
 //          Added indoor/outdoor parameter.
 //          Added Fahrenheit conversion.
+// v0.1.3 - Changed the schema slightly
 
 
 #include <IotWebConf.h>
@@ -21,11 +22,14 @@
 #include <SPI.h>
 #include "time.h"
 #include <HTTPClient.h>
+#include <RingBuf.h>
+
+RingBuf<String, 300> logBuffer;
 
 // Store the IotWebConf config version.  Changing this forces IotWebConf to ignore previous settings
 // A useful alternative to the Pin 12 to GND reset
-#define CONFIG_VERSION "012"
-#define CONFIG_VERSION_NAME "v0.1.2"
+#define CONFIG_VERSION "013"
+#define CONFIG_VERSION_NAME "v0.1.3"
 // IotWebConf max lengths
 #define STRING_LEN 50
 #define NUMBER_LEN 32
@@ -78,7 +82,6 @@ long lastNtpTimeRead = 0;
 long nowTime = 0;
 long prevTime = 0;
 boolean ntpSuccess = false;
-float celcius = 0;
 String errorState = "NONE";
 // -- Callback method declarations.
 void configSaved();
@@ -98,11 +101,7 @@ IotWebConfParameter elasticPort = IotWebConfParameter("Elasticsearch Port", "ela
 IotWebConfParameter elasticIndex = IotWebConfParameter("Elasticsearch Index", "elasticIndex", elasticIndexForm, STRING_LEN);
 IotWebConfParameter latValue = IotWebConfParameter("Decimal Longitude", "latValue", latForm, NUMBER_LEN, "number", "e.g. 41.451", NULL, "step='0.001'");
 IotWebConfParameter lngValue = IotWebConfParameter("Decimal Latitude", "lngValue", lngForm, NUMBER_LEN, "number", "e.g. -23.712", NULL, "step='0.001'");
-IotWebConfParameter environment = IotWebConfParameter("Sensor Name/Location Type (indoor/outdoor)", "environment", envForm, STRING_LEN);
-
-
-
-
+IotWebConfParameter environment = IotWebConfParameter("Environment Type (indoor/outdoor)", "environment", envForm, STRING_LEN);
 
 // Setup everything...
 void setup() {
@@ -175,29 +174,24 @@ void sampleAndSend() {
   bme_pressure->getEvent(&pressure_event);
   bme_humidity->getEvent(&humidity_event);
   // Store the values from the BME280 in local vars
-  float celcius = temp_event.temperature;
+  float temperature = temp_event.temperature;
   float humidity = humidity_event.relative_humidity;
   float pressure = pressure_event.pressure;
   // Store whether the sensor was connected
   // Sanity check to make sure we are not underwater, or in space!
-  if (celcius < -40.00) {
+  if (temperature < -40.00) {
     errorState = "ERROR: TEMPERATURE SENSOR MISREAD";
     if (pressure > 1100.00) {
       errorState = "ERROR: PRESSURE SENSOR MISREAD";
     }
   }
   // Build the dataset to send
-  float fahrenheit = celcius * 1.8 + 32;
   String dataSet = " {\"@timestamp\":";
   dataSet += String(nowTime);
   dataSet += ",\"pressure\":"; 
   dataSet += String(pressure);
   dataSet += ",\"temperature\":";
-  dataSet += String(celcius);
-  dataSet += ",\"celcius\":";
-  dataSet += String(celcius);
-  dataSet += ",\"fahrenheit\":";
-  dataSet += String(fahrenheit);
+  dataSet += String(temperature);
   dataSet += ",\"humidity\":";
   dataSet += String(humidity);
   dataSet += ",\"errorState\": \"";
@@ -215,6 +209,7 @@ void sampleAndSend() {
   dataSet += "\"";
   dataSet += "}";
 
+  logBuffer.push(dataSet);
   // Build the URL to send the JSON structure to
   String url = elasticPrefixForm;
   url += elasticUsernameForm;
@@ -271,7 +266,16 @@ void handleRoot()
   s += "<li>Sensor Longitude: ";
   s += lngForm;
   s += "</ul>";
+  s += "<p>";
+  s += "<p>";
   s += "Go to <a href='config'>configure page</a> to change values.";
+  s += "<p>";
+  s += "Last few datapoints sent:";
+  for (int counter = 0; counter < logBuffer.size(); counter++) {
+    s+= logBuffer[counter];
+    s += "<p>";
+  }
+  s += "<p>";
   s += "</body></html>\n";
   server.send(200, "text/html", s);
 }
@@ -292,6 +296,7 @@ bool formValidator()
     debugOutput("ERROR: Form validation failed");
     valid = false;
   }
+  // TODO: Add some validation of params here.
   return valid;
 }
 
