@@ -11,8 +11,7 @@
 // v0.1.2 - Fix reset issue (oops! Connecting Pin 12 and GND does not reset AP password).
 //          Added indoor/outdoor parameter.
 //          Added Fahrenheit conversion.
-// v0.1.3 - Changed the schema slightly
-
+// v0.1.3 - Changed the schema slightly and added a Buffer for the data
 
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
@@ -24,7 +23,6 @@
 #include <HTTPClient.h>
 #include <RingBuf.h>
 
-RingBuf<String, 300> logBuffer;
 
 // Store the IotWebConf config version.  Changing this forces IotWebConf to ignore previous settings
 // A useful alternative to the Pin 12 to GND reset
@@ -79,10 +77,15 @@ char envForm[STRING_LEN] = "indoor";
 long secondsSinceLastCheck = 0;
 long lastReadClock = 0;
 long lastNtpTimeRead = 0;
+// Store the current and previous time - if different (i.e. the second has changed), get a new reading.
 long nowTime = 0;
 long prevTime = 0;
 boolean ntpSuccess = false;
 String errorState = "NONE";
+// Store data that is not sent for later delivery 
+RingBuf<String, 3600> storageBuffer;
+// Log store - only need 50 - plan is to display and update on main page
+RingBuf<String, 50> logBuffer;
 // -- Callback method declarations.
 void configSaved();
 bool formValidator();
@@ -209,7 +212,6 @@ void sampleAndSend() {
   dataSet += "\"";
   dataSet += "}";
 
-  logBuffer.push(dataSet);
   // Build the URL to send the JSON structure to
   String url = elasticPrefixForm;
   url += elasticUsernameForm;
@@ -227,6 +229,11 @@ void sampleAndSend() {
   http.addHeader("Content-Type", "application/json");
   int httpCode = http.POST(dataSet);
   debugOutput("INFO: Response: " + String(httpCode));
+  logBuffer.push("Request:"+ dataSet + " Response:" + (String)httpCode);
+  if (httpCode == -1){
+    // This happens when ES does not answer - store this for sending later if we can...
+    storageBuffer.push(dataSet);
+  }
 }
 
 /**
@@ -269,13 +276,14 @@ void handleRoot()
   s += "<p>";
   s += "<p>";
   s += "Go to <a href='config'>configure page</a> to change values.";
-  s += "<p>";
-  s += "Last few datapoints sent:";
-  for (int counter = 0; counter < logBuffer.size(); counter++) {
-    s+= logBuffer[counter];
-    s += "<p>";
+  s += "<p><font face=\"Sans serif,Comic Sans MS,Lucida Console\">";
+  s += "Last few datapoints sent:<br>";
+  String logLine = "";
+  while (logBuffer.pop(logLine)) {
+    s += logLine;
+    s += "<br>";
   }
-  s += "<p>";
+  s += "</font><p>";
   s += "</body></html>\n";
   server.send(200, "text/html", s);
 }
