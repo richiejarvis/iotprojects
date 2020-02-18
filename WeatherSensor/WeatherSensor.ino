@@ -11,7 +11,7 @@
 // v0.1.2 - Fix reset issue (oops! Connecting Pin 12 and GND does not reset AP password).
 //          Added indoor/outdoor parameter.
 //          Added Fahrenheit conversion.
-// v0.1.3 - Changed the schema slightly and added a Buffer for the data
+// v0.1.3 - Changed the schema slightly and added a Buffer for the data, and logging to the webpage
 
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
@@ -83,9 +83,9 @@ long prevTime = 0;
 boolean ntpSuccess = false;
 String errorState = "NONE";
 // Store data that is not sent for later delivery
-RingBuf<String, 3600> storageBuffer;
+RingBuf<String, 1200> storageBuffer;
 // Log store - only need 50 - plan is to display and update on main page
-RingBuf<String, 20> logBuffer;
+RingBuf<String, 100> logBuffer;
 // -- Callback method declarations.
 void configSaved();
 bool formValidator();
@@ -109,7 +109,7 @@ IotWebConfParameter environment = IotWebConfParameter("Environment Type (indoor/
 // Setup everything...
 void setup() {
   Serial.begin(115200);
-  debugOutput("Starting WeatherSensor " + (String)CONFIG_VERSION_NAME);
+  debugOutput("INFO: Starting WeatherSensor " + (String)CONFIG_VERSION_NAME);
   // Initialise IotWebConf
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
@@ -129,7 +129,7 @@ void setup() {
   // This part tries I2C address 0x77 first, and then falls back to using 0x76.
   // If there is no I2C data with these addresses on the bus, then it reports a Fatal error, and stops
   if (!bme.begin(0x77, &Wire)) {
-    debugOutput("Not on 0x77 I2C address - checking 0x76");
+    debugOutput("INFO: BME280 not using 0x77 I2C address - checking 0x76");
     if (!bme.begin(0x76, &Wire)) {
       debugOutput("FATAL: Could not find a valid BME280 sensor, check wiring!");
       while (1) delay(10);
@@ -149,12 +149,12 @@ void setup() {
   server.onNotFound([]() {
     iotWebConf.handleNotFound();
   });
+  debugOutput("INFO: Initialisation completed");
 }
 
 void loop() {
-//  debugOutput("INFO: In Main Loop");
-  // Check for configuration changes
   iotWebConf.doLoop();
+  // Check for configuration changes  
   // Check if the wifi is connected
   if (isConnected() || nowTime > 0) {
     // Check if we need a new NTP time
@@ -245,22 +245,20 @@ int sendData(String dataBundle) {
     url += "/";
     url += elasticIndexForm;
     url += "/_doc";
-    debugOutput("INFO: Sending: " + dataBundle);
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
     httpCode = http.POST(dataBundle);
-    debugOutput("INFO: Response: " + String(httpCode));
+    debugOutput("INFO: Status: " + String(httpCode) + " Sent: " + dataBundle);
   } else {
     // No connection?  No problem - store it...
     storageBuffer.push(dataBundle);
-    debugOutput("WARN: Unable to send - Storing Dataset");
+    debugOutput("WARN: Stored: " + dataBundle);
   }
-  rollingLogBuffer("Request:" + dataBundle + " Response:" + (String)httpCode);
   return httpCode;
 }
 
 void rollingLogBuffer(String line) {
-  if (logBuffer.size() >= 20) {
+  if (logBuffer.size() >= 100) {
     String throwAway = "";
     logBuffer.pop(throwAway);
   }
@@ -278,23 +276,18 @@ void handleRoot()
     // -- Captive portal request were already served.
     return;
   }
-
-  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>WeatherStation - " + (String)CONFIG_VERSION_NAME + "</title></head><body>";
+  String s = "<!DOCTYPE html><html lang='en'><head><meta http-equiv='refresh' content='60'><meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'/>";
+  s += "<title>" + (String)iotWebConf.getThingName() + " - WeatherStation - " + (String)CONFIG_VERSION_NAME + "</title></head><body>";
+  s += "<h1>" + (String)iotWebConf.getThingName() + " - WeatherStation - " + (String)CONFIG_VERSION_NAME + "</h2>";
+  s += "Current Settings";
   s += "<ul>";
   s += "<p>";
-  s += "<li>SensorName: ";
+  s += "<li>SensorName/Config AP: ";
   s += (String)iotWebConf.getThingName();
-  s += "<li>Elasticsearch Scheme: ";
-  s += elasticPrefixForm;
   s += "<li>Elasticsearch Username: ";
   s += elasticUsernameForm;
-  s += "<li>Elasticsearch Password: ";
-  s += elasticPassForm;
   s += "<li>Elasticsearch Hostname: ";
-  s += elasticHostForm;
-  s += "<li>Elasticsearch Port: ";
-  s += elasticPortForm;
+  s += (String)elasticPrefixForm + (String)elasticHostForm + ":" + (String)elasticPortForm;
   s += "<li>Elasticsearch Index/Alias: ";
   s += elasticIndexForm;
   s += "<li>Sensor Environment Type: ";
@@ -306,11 +299,13 @@ void handleRoot()
   s += "</ul>";
   s += "<p>";
   s += "<p>";
-  s += "Go to <a href='config'>configure page</a> to change values.<br><p>storageBuffer Size in Memory:";
+  s += "Go to <a href='config'>configure page</a> to change values.<br>";
+  s += "<p><i>Connect pin " + (String) CONFIG_PIN + " to GND and Reset the board to reset the Configuration AP password to: " + (String)wifiInitialApPassword + "</i>";
+  s += "<p>Offline storageBuffer Records in Storage:";
   s += storageBuffer.size();
   s += "<p>Last ";
   s += (String)logBuffer.size();
-  s += " datapoints sent:<br><code>";
+  s += " loglines:<br><code>";
   for (int count = 0 ; count < logBuffer.size(); count++) {
     s += logBuffer[count];
     s += "<br>";
@@ -371,5 +366,7 @@ void getNtpTime()
 // Simple output...
 void debugOutput(String textToSend)
 {
-  Serial.println("time:" + (String)nowTime + ": " + textToSend);
+  String text = "t:" + (String)nowTime + ":" + textToSend;
+  Serial.println(text);
+  rollingLogBuffer(text);
 }
