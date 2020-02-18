@@ -1,5 +1,5 @@
 // WeatherSensor.ino - Richie Jarvis - richie@helkit.com
-// Version: v0.1.3 - 2020-02-18
+// Version: v0.1.4 - 2020-02-18
 // Github: https://github.com/richiejarvis/iotprojects/tree/master/WeatherSensor
 // Version History
 // v0.0.1 - Initial Release
@@ -12,6 +12,7 @@
 //          Added indoor/outdoor parameter.
 //          Added Fahrenheit conversion.
 // v0.1.3 - Changed the schema slightly and added a Buffer for the data, and logging to the webpage
+// v0.1.4 - Bug fixes
 
 #include <IotWebConf.h>
 #include <Adafruit_Sensor.h>
@@ -26,8 +27,8 @@
 
 // Store the IotWebConf config version.  Changing this forces IotWebConf to ignore previous settings
 // A useful alternative to the Pin 12 to GND reset
-#define CONFIG_VERSION "013"
-#define CONFIG_VERSION_NAME "v0.1.3"
+#define CONFIG_VERSION "014"
+#define CONFIG_VERSION_NAME "v0.1.4"
 // IotWebConf max lengths
 #define STRING_LEN 50
 #define NUMBER_LEN 32
@@ -154,7 +155,7 @@ void setup() {
 
 void loop() {
   iotWebConf.doLoop();
-  // Check for configuration changes  
+  // Check for configuration changes
   // Check if the wifi is connected
   if (isConnected() || nowTime > 0) {
     // Check if we need a new NTP time
@@ -181,7 +182,7 @@ void loop() {
   delay(100);
 }
 
-boolean isConnected(){
+boolean isConnected() {
   return (iotWebConf.getState() == 4);
 }
 
@@ -249,6 +250,11 @@ int sendData(String dataBundle) {
     http.addHeader("Content-Type", "application/json");
     httpCode = http.POST(dataBundle);
     debugOutput("INFO: Status: " + String(httpCode) + " Sent: " + dataBundle);
+    if (httpCode == -1) {
+      // Didn't get a valid response, so store this one till be get a connection back...
+      storageBuffer.push(dataBundle);
+      debugOutput("WARN: Stored: " + dataBundle);
+    }
   } else {
     // No connection?  No problem - store it...
     storageBuffer.push(dataBundle);
@@ -370,4 +376,3 @@ void debugOutput(String textToSend)
   Serial.println(text);
   rollingLogBuffer(text);
 }
-
