@@ -1,5 +1,5 @@
 // WeatherSensor.ino - Richie Jarvis - richie@helkit.com
-// Version: v0.1.2 - 2020-02-07
+// Version: v0.1.3 - 2020-02-18
 // Github: https://github.com/richiejarvis/iotprojects/tree/master/WeatherSensor
 // Version History
 // v0.0.1 - Initial Release
