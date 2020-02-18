@@ -152,11 +152,11 @@ void setup() {
 }
 
 void loop() {
-  debugOutput("INFO: In Main Loop");
+//  debugOutput("INFO: In Main Loop");
   // Check for configuration changes
   iotWebConf.doLoop();
   // Check if the wifi is connected
-  if (iotWebConf.getState() == 4 || nowTime > 0) {
+  if (isConnected() || nowTime > 0) {
     // Check if we need a new NTP time
     getNtpTime();
     // If we've got a valid time, get a sample, and send it to Elasticsearch
@@ -169,7 +169,8 @@ void loop() {
         while (storageBuffer.pop(dataSet) && httpCode == 201) {
           // Pop the Queue until we can pop no more...
           debugOutput("WARN: Emptying thy buffer unto Elasticsearch - Size Left:" + (String)storageBuffer.size());
-          httpCode == sendData(dataSet);
+          httpCode = sendData(dataSet);
+
         }
         debugOutput("WARN: My cup is empty - Size Left:" + (String)storageBuffer.size());
       }
@@ -177,10 +178,12 @@ void loop() {
     // Store the last time we sent, so we can check when we need to do it again
     prevTime = nowTime;
   }
-  delay(500);
+  delay(100);
 }
 
-
+boolean isConnected(){
+  return (iotWebConf.getState() == 4);
+}
 
 String sample() {
   // Start a sample
